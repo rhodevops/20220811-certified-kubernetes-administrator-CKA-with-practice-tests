@@ -215,3 +215,4 @@ kubectl exec etcd-master -n kube-system -- sh -c "ETCDCTL_API=3 etcdctl get / --
 
 ## Kube-api server
 
+El `Kube-apiserver` es el componente del control plane que expone la API de kubernetes. Se encarga de servir las operaciones REST
