@@ -59,7 +59,7 @@ Vamos a ver aspectos fundamentales del `etcd`. Más adelante en el curso, se hab
 
 ### ¿Qué es el ETCD?
  
-`ETCD` es un sistema de almacenamiento clave-valor (key-value store) seguro y distribuido. Es simple, seguro y rápido.
+`etcd` es un sistema de almacenamiento clave-valor (key-value store) seguro y distribuido. Es simple, seguro y rápido.
 
 Es importante distinguir entre una una `tabular/relational database`
 
@@ -92,8 +92,8 @@ El cliente por defecto es el cliente de CLI `etcdctl`
 Para añadir una entrada en la base de datos y para extraer un valor se utilizan las siguientes órdenes:
 
 ```bash
-etcdctl set key1 value1
-etcdctl get key1 
+> etcdctl set key1 value1
+> etcdctl get key1 
 ```
 
 ## ETCD en kubernetes
@@ -116,23 +116,23 @@ Dependiendo del setup del cluster, el despliegue del ETCD se hace de una manera 
 Si se ha configurado el cluster desde cero, hay que desplegar el ETCD descargando e instalando los binarios 
 
 ```bash
-wget -q --http-only \
+> wget -q --http-only \
     "httpds://github.com/[...].tar.gz"
 ```
 
-y configurando ETCD como service en el nodo master. Hay muchos opciones que pueden pasarse al servicio. Algunas de ellas son relativas a certificados. Más adelante en el curso, se verán los certificados TLS:
+y configurando ETCD como service en el nodo master. 
+
+Hay muchos parámetros que pueden pasarse al servicio. Algunos de ellos son relativos a certificados. Más adelante en el curso, se verán los certificados TLS:
 
 ```bash
 # etcd.service
-ExecStart=/usr/local/bin/etcd \\
+ExecStart=/usr/local/bin/etcd \\ # faltan parámetros
     --name ${ETCD_NAME}
     --cert-file=/etc/etcd/kubernetes.pem \\
-    [...]
     --advertise-client-urls https://${INTERNAL_IP}:2379 \\
-    [...]
 ```
 
-La opción `--advertise-client-urls` 
+El parámetro `--advertise-client-urls` 
 
 - Se utiliza para especificar la dirección (ip del servidor y puerto) por la que escucha el ETCD.
 - El puerto por defecto es `2379`
@@ -148,13 +148,13 @@ Investigar cual es el repo más adecuado para obtener el archivo `.tar.gz`. Algu
 Si se ha configurado el cluster con kubeadmin, entonces kubeadmin despliega el servicio ETCD como pod en el namespace `kube-system`. 
 
 ```bash
-kubectl get pods exec -n kube-system
+> kubectl get pods exec -n kube-system
 ```
 
 Dentro de este pod, `etcd-master`, se puede utilizar el cliente `etcdctl` para explorar la base de datos etcd. Por ejmplo, podemos listar todas las claves almacenadas por kubernetes:
 
 ```bash
-kubectl exec etcd-master -n kube-system etcdctl get / --prefix -keys-only
+> kubectl exec etcd-master -n kube-system etcdctl get / --prefix -keys-only
 ```
 
 ### ETCD en un HA Environment
@@ -163,10 +163,8 @@ En un entorno de alta disponibilidad, se tienen varios nodos master y por lo tan
 
 ```bash
 # etcd.service
-ExecStart=/usr/local/bin/etcd \\
-    [...]
+ExecStart=/usr/local/bin/etcd \\ 
     --initial-cluster controller-0=https://{CONTROLLER0_IP}:2380,controller-10=https://{CONTROLLER1_IP}:2380 \\
-    [...]
 ```
 
 ### Comandos de ETCD
@@ -176,43 +174,351 @@ El cliente `etcdctl` puede interactuar con el servidor ETCD usando dos versiones
 Algunos comandos de la versión 2:
 
 ```bash
-etcdtl backup
-etcdctl cluster-health
-etcdctl mk
-etcdctl mkdir
-etcdctl set
+> etcdtl backup
+> etcdctl cluster-health
+> etcdctl mk
+> etcdctl mkdir
+> etcdctl set
 ```
 
 Estos comandos cambian en la versión 3:
 
 ```bash
-etcdctl snapshot save 
-etcdctl endpoint health
-etcdctl get
-etcdctl put
+> etcdctl snapshot save 
+> etcdctl endpoint health
+> etcdctl get
+> etcdctl put
 ```
 
 Para establecer la versión se puede utiliza la siguiente variable de entorno
 
 ```bash
-export ETCDCTL_API=3
+> export ETCDCTL_API=3
 ```
 
 Aparte, hay que especificar la ruta de los archivos de certificados para que el cliente `etcdctl` pueda autenticarse con el `ETCD API Server`. Estos están disponibles en las siguiebtes rutas dentro del contenedor `etcd-master`:
 
 
 ```bash
---cacert /etc/kubernetes/pki/etcd/ca.crt     
---cert /etc/kubernetes/pki/etcd/server.crt     
---key /etc/kubernetes/pki/etcd/server.key
+/etc/kubernetes/pki/etcd/ca.crt     
+/etc/kubernetes/pki/etcd/server.crt     
+/etc/kubernetes/pki/etcd/server.key
 ```
 
 Se utilizará el siguiente comando:
 
 ```bash
-kubectl exec etcd-master -n kube-system -- sh -c "ETCDCTL_API=3 etcdctl get / --prefix --keys-only --limit=10 --cacert /etc/kubernetes/pki/etcd/ca.crt --cert /etc/kubernetes/pki/etcd/server.crt  --key /etc/kubernetes/pki/etcd/server.key" 
+> kubectl exec etcd-master -n kube-system -- sh -c "ETCDCTL_API=3 etcdctl get / --prefix --keys-only --limit=10 --cacert /etc/kubernetes/pki/etcd/ca.crt --cert /etc/kubernetes/pki/etcd/server.crt  --key /etc/kubernetes/pki/etcd/server.key" 
 ```
 
-## Kube-api server
+## Kube API server
 
-El `Kube-apiserver` es el componente del control plane que expone la API de kubernetes. Se encarga de servir las operaciones REST
+El `Kube-apiserver` es el componente del control plane que expone la API de kubernetes. Se encarga de manejar las peticiones de tipo REST. 
+
+Cuando se ejecuta un comando `kubectl`, se hace una llamada a al `kube-api server`, que autentica y valida la petición. Entonces recibe la información de `etcd` y respionde de vuelta con la información pedida. Realmente no sería necesario utilizar la herramienta kubectl, sino que se podría invocar directamente la API.
+
+```bash
+> curl -X POST /api/v1/namespaces/default/pods ...[other]
+```
+
+Proceso:
+
+1. Authenticate User
+2. Validate Request
+3. Retrieve data
+4. Update ETCD
+5. Scheduler
+6. Kubelet
+
+El `Kube-apiserver` es el único componente que interactúa directamente con la base de datos `etcd`. Se puede describir como el centro que gestiona las diferentes tareas necesarias para realizar un cambio en el cluster.
+
+Si se configura kubernetes mediante la "hard way", hay que saber que el `Kube-apiserver` está disponible como binarios en la página de kubernetes. Se deberá descargar y configurar para que se ejecute como servicio en el nodo master. Habrá que configurar varias parámetros y al igual que con otros componentes, son de especial importancias los parámetros relativos a los certificados. 
+
+Es muy importante tener claro que todos los componentes del cluster están interrelacionados y que cada componente debe conocer dónde se encuentra el resto.
+
+Si has configurado el cluster de kubernetes con kubeadmin, entonces el `kube-apiserver` se ha desplegado como pod en el namespace `kube-system` en el nodo máster.
+
+```bash
+> kubectl get pods -n kube-system
+```
+
+Para consultar el manifiesto utilizado en la definición del pod y en la definición del service se puede ordenar lo siguiente:
+
+```bash
+> cat /etc/kubernetes/manifests/kube-apiserver.yaml
+> cat /etc/kubernetes/manifests/kube-apiserver.service
+```
+
+Para ver el proceso del kube-apiserver y las opciones de parámetro efectivas, se puede ejecutar en el nodo master:
+
+```bash
+> ps -aux | grep kube-apiserver
+```
+
+## Kube Controller Manager
+
+El `kube-controller-manager` gestiona varios controladores dentro de kubernetes. Es responsable de monitorizar y llevar a cabo acciones de repuesta. 
+
+Proceso:
+
+1. Watch Status
+2. Remediate Situation
+
+Hay dos tipos de controladores que son muy importante:
+
+- `Node-Controller` Controla el estado de los nodos para que no se caiga la aplicación que se ejecuta en ellos.
+    - Node Monitor Period = 5s
+    - Node Monitor Grace Period = 40s
+    - POD Eviction Timeout = 5m
+- `Replication-Controller` Controla el número de replicas y se asegura de que estén levantados el número de pods deseado. Si el pod se cae, levanta otro.
+
+Sobre los parámetros mencionados:
+
+- `Node Monitor Period` Periodo de monitorización.
+- `Node Monitor Grace Period` Periodo de gracia desde el momento en que el nodo se cae hasta que se marca como `unreachable`
+- `POD Eviction Timeout` Tiempo de espera para que el nodo vuelva a levantar. Si no lo hace, los pods se realojan en un nodo sano si estos forman parte de un Replica-Set.
+
+Aparte de los mencionadosn, hay otros tipos de controladores:
+
+- `Deployment-Controller`
+- `Namespace-Controller`
+- `Job-Controller`
+- `CronJob-Controller`
+- `Endpoint-Controller`
+- etc
+
+Cuando se instala el `kube-controller-manager`, se instalan también los diferentes tipos de controladores.
+
+Al igual que con otros componentes, para intalarlo se hace lo habitual:
+
+- Descargar/Extraer el binario `kube-controller-manager`
+- Ejecutarlo como servicio
+
+Se muestra a continuación algun parámetro de la configuración:
+
+```bash
+# kube-controller-manager.service
+ExecStart=/usr/local/bin/kube-controller-manager \\ 
+    --addres=0.0.0.0 \\
+    --cluster-cidr=10.200.0.0/16 \\
+    --node-monitor-period=5s \\
+    --node-monitor-grace-period=40s \\
+    --pod-eviction-timeout=5m0s \\
+```
+
+Si has configurado el cluster de kubernetes con kubeadmin, entonces el `kube-controller-manager` se ha desplegado como pod en el namespace `kube-system` en el nodo máster.
+
+```bash
+> kubectl get pods -n kube-system
+```
+
+Para consultar el manifiesto utilizado en la definición del pod y en la definición del service se puede ordenar lo siguiente:
+
+```bash
+> cat /etc/kubernetes/manifests/kube-controller-manager.yaml
+> cat /etc/kubernetes/manifests/kube-controller-manager.service
+```
+
+Para ver el proceso del kube-controller-manager y las opciones de parámetro efectivas, se puede ejecutar en el nodo master:
+
+```bash
+> ps -aux | grep kube-controller-manager
+```
+
+## Kube Scheduler
+
+`kube scheduler` es el responsable de la programación de los nodos y los pods. Es decir, se encarga de decidir que pod se aloja en que nodo. Pero no se encarga de crearlo, eso lo hace el agente `kubelet` del nodo.
+
+Normalmente, se tendrán pods con distintos requerimientos. Proceso de alojo de un pod en un nodo:
+
+1. **Descartar nodos** Se descartan los nodos que no se adaptan al pérfil del pod (p.e. por insuficiente CPU)
+2. **Clasificar nodos** En función de varios parámetros (p.e. cantidad de CPU que queda libre tras la asignación)
+
+Al igual que con otros componentes, para intalarlo se hace lo habitual:
+
+- Descargar/Extraer el binario `kube-scheduler`
+- Ejecutarlo como servicio
+
+Se muestra a continuación algun parámetro de la configuración:
+
+```bash
+# kube-scheduler.service
+ExecStart=/usr/local/bin/kube-scheduler \\ 
+    --config=/etc/kubernetes/config/kube-scheduler.yaml \\
+    --v=2 
+```
+
+Si has configurado el cluster de kubernetes con kubeadmin, entonces el `kube-scheduler` se ha desplegado como pod en el namespace `kube-system` en el nodo máster.
+
+```bash
+> kubectl get pods -n kube-system
+```
+
+Para consultar el manifiesto utilizado en la definición del pod se puede ordenar lo siguiente:
+
+```bash
+> cat /etc/kubernetes/manifests/kube-scheduler.yaml
+```
+
+Para ver el proceso del kube-scheduler y las opciones de parámetro efectivas, se puede  ejcutar en el nodo master:
+
+```bash
+> ps -aux | grep kube-scheduler
+```
+
+## Kubelet
+
+`kubelet` es el agente que se ejecuta en el nodo. 
+
+Algunas funciones:
+
+- Crear los pods en el nodo siguiendo las instrucciones del scheduler.
+- El kubelet envía la petición al container runtime (docker).
+- Monitorizar el nodo y los pods.
+
+***Importante: kubeadmin no despliega kubelets** A diferencia que con los componentes descritos hasta ahora, la opción kudeadmin no despliega los kubelets automáticamente en forma de pods, sino que hay que instalarlos de forma manual en los nodos worker.
+
+El proceso es el habitual:
+
+- Descargar/Extraer el binario `kubelet`
+- Ejecutarlo como servicio
+
+Se muestra a continuación algun parámetro de la configuración:
+
+```bash
+# kube-scheduler.service
+ExecStart=/usr/local/bin/kubelet \\ # faltán parámetros
+    --config=/var/lib/kubelet/kube-config.yaml \\
+    --container-runtime=remote \\
+```
+
+Para ver el proceso del kubelet y las opciones de parámetro efectivas, se puede  ejecutar en el nodo worker:
+
+```bash
+> ps -aux | grep kubelet
+```
+
+## Kube Proxy
+
+### Contexto y necesidad
+
+En un cluster de kuberentes cualquier pod tiene que poder alcanzar cualquier otro pod. Esto se satisface desplegando una solución de POD networking. 
+
+- Una POD network es una red virtual interna que se expande a través de los nodos del clúster conéctándolos.
+- Hay varias solucionens disponibles.
+
+Imaginemos que tenemos el siguiente cluster de dos nodos:
+
+```latex
+ +-----------------------------------------------+
+ | Cluster de dos nodos                          |
+ +-----------------------------------------------+
+---------------------------------------------------
+ POD Network
+ +-----------------------+-----------------------+
+ | Nodo 1                | Nodo 2                |
+ | +-------------------+ | +-------------------+ |
+ | | Pod: webapp       | | | Pod: database     | |
+ | | 10.32.0.14        | | | 10.32.0.15        | |
+ | +-------------------+ | +-------------------+ | 
+ | kube-proxy            | kube-proxy            |
+ +-----------+-----------+-----------+-----------+
+             |                       |
+             +----- service: db -----+
+                     10.96.0.12
+```
+
+Varias cosas que hay que saber:
+
+- La webapp se podría alcanzar la database utilizando la IP pero no es lo recomendable por todas las razones ya conocidad.
+- El service `db` se utiliza para exponer la database y pueda llegar hasta ella la webapp.
+- El service es accesible desde cualquier nodo del clúster.
+
+La pregunta es: ¿El service `db` está unido a la POD Network? La respuesta es NO. El service no es un contenedor y por tanto no tiene una interface o un proceso escuchando de forma activa.
+
+El service es un componente virtual que **solamente vive en la memoria de kubernetes**. ¿Cómo se alcanca entonces el service? Aqui es donde enta el kube-proxy.
+
+El `kube-proxy` es un proceso que se ejecuta en cada nodo del clúster de kubernetes. Su cometido es buscar nuevos servicios. 
+
+Cada vez que se crea un nuevo servicio, el kube-proxy crea las reglas apropiedadas en cada nodo para reenviar el tráfico a esos servicios. Una forma de hacerlo es utilizando reglas `iptables`.
+
+**Información** Iptables es una herramienta linux que se encarga de analizar cada uno de los paquetes del tráfico de red que entra en una máquina y decidir, en función de un conjunto de reglas, qué hacer con ese paquete.
+
+En este caso, kube-proxy crea una regla de tablas ip en cada nodo del clúster para reenviar el tráfico que se dirije a la IP del servicio, que es `10.96.0.12`, a la IP del nodo actual que es `10.32.0.15`
+
+```latex
+ +-----------------------------------------------+
+ | Cluster de dos nodos                          |
+ +-----------------------------------------------+
+---------------------------------------------------
+ POD Network
+ +-----------------------+-----------------------+
+ | Nodo 1                | Nodo 2                |
+ | +-------------------+ | +-------------------+ |
+ | | Pod: webapp       | | | Pod: database     | |
+ | | 10.32.0.14        | | | 10.32.0.15        | |
+ | +-------------------+ | +-------------------+ | 
+ | kube-proxy            | kube-proxy            |
+ | IP table rule:        | IP table rule:        |
+ | 10.96.0.12            | 10.96.0.12            |
+ | -> 10.32.0.15         | -> 10.32.0.15         |
+ +-----------+-----------+-----------+-----------+
+             |                       |
+             +----- service: db -----+
+                     10.96.0.12
+```
+
+### Instalación de Kube Proxy
+
+Al igual que con otros componentes, para intalarlo se hace lo habitual:
+
+- Descargar/Extraer el binario `kube-proxy`
+- Ejecutarlo como servicio
+
+Se muestra a continuación algun parámetro de la configuración:
+
+```bash
+# kube-scheduler.service
+ExecStart=/usr/local/bin/kube-scheduler \\ 
+    --config=/var/lib/kube-proxy/kube-proxy-config.yaml 
+Restart=on-failure
+RestartSec=5
+```
+
+Si has configurado el cluster de kubernetes con kubeadmin, entonces el `kube-proxy` se ha desplegado como daemon-set en el namespace `kube-system`, de modo que hay un pod desplegado en cada nodo: 
+
+```bash
+> kubectl get daemonset -n kube-system
+```
+
+## Recapitulando sobre los pods de kubernetes
+
+Sea el siguiente escenario:
+
+- Tenemos una aplicación desarrollada y construída como imagen de docker.
+- La imagen se encuentra en un repo al que puede acceder kubernetes.
+- Tenemos levantado un clúster de kubernetes que se encuentra operativo.
+
+Se recuerda que el cometido principal de kubernetes es deplegar nuestra aplicación en forma de contenedores que se ejecutan en una serie de máquinas configuradas como nodos worker dentro del clúster. 
+
+Sin embargo, kubernetes no despliega los contenedores directamente en los nodos sino que los encapsula como pods. Un pod es la instancia unitaria de la aplicación y el objeto mínimo que se puede crear en kubernetes.
+
+- En un mismo pod, no existen contenedores de un mismo tipo.
+- La relación 1/1 entre pods y contenedores es muy habitual.
+- Un pod multi-container contiene otros contenedores que dan soporte al contenedor principal. Estos contenedores nacen y mueren juntos.
+
+Para escalar la aplicación se hace lo siguiente:
+
+- Desplegar nuevas intancias de la aplicación en forma de pods en el mismo nodo.
+- Crear un nuevo nodo para desplegar más pods que contienen nuevas instancias de la aplicación.
+
+Consultar los apuntes del curso `20220711-kubernetes-for-the-absolute-beginners`. Ver la sección **Conceptos de kubernetes** para refescar lo siguiente:
+
+- Los conceptos básicos acerca de la necesidad de los pods.
+- La utilidad de terminal `kubelet`
+
+
+
+
+
+                       
