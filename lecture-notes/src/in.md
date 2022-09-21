@@ -491,7 +491,7 @@ Si has configurado el cluster de kubernetes con kubeadmin, entonces el `kube-pro
 > kubectl get daemonset -n kube-system
 ```
 
-## Recapitulando sobre los pods de kubernetes
+## Recap. Sobre los pods de kubernetes
 
 Sea el siguiente escenario:
 
@@ -517,8 +517,273 @@ Consultar los apuntes del curso `20220711-kubernetes-for-the-absolute-beginners`
 - Los conceptos básicos acerca de la necesidad de los pods.
 - La utilidad de terminal `kubelet`
 
+## Recap. Pods with YAML
 
+Consultar la sección correspondiente dentro de **[Conceptos de kubernetes: Pods, ReplicaSets, Deployments]** en los apuntes siguientes:
 
+> `20220711-kubernetes-for-the-absolute-beginners`.
 
+## Lab. Pods
 
-                       
+Algunos comandos utilizados:
+
+```bash
+kubectl get pods
+kubectl apply -f <name-pod.yaml>
+kubectl run nginx --image=nginx
+kubectl describe pods
+kubectl get nodes
+kubectl describe pods <pod_name> | grep "Container ID"
+kubectl delete pod <pod_name>
+```
+    
+## Recap. Replica Sets
+
+Consultar la sección correspondiente dentro de **[Conceptos de kubernetes: Pods, ReplicaSets, Deployments]** en los apuntes siguientes:
+
+> `20220711-kubernetes-for-the-absolute-beginners`.
+
+## Lab. Replica Sets
+
+Algunos comandos utilizados:
+
+```bash
+kubectl get rs
+kubectl get rs -o wide
+kubectl edit rs <replica-set-name>
+kubectl scale --replicas=5 rs <replica-set-name>
+```
+
+## Recap. Deployments
+
+Consultar la sección correspondiente dentro de **[Conceptos de kubernetes: Pods, ReplicaSets, Deployments]** en los apuntes siguientes:
+
+> `20220711-kubernetes-for-the-absolute-beginners`.
+
+## Certification tip
+
+As you might have seen already, it is a bit difficult to create and edit YAML files. Especially in the CLI. During the exam, you might find it difficult to copy and paste YAML files from browser to terminal. Using the kubectl run command can help in generating a YAML template. And sometimes, you can even get away with just the kubectl run command without having to create a YAML file at all. For example, if you were asked to create a pod or deployment with specific name and image you can simply run the kubectl run command.
+
+Use the below set of commands and try the previous practice tests again, but this time try to use the below commands instead of YAML files. Try to use these as much as you can going forward in all exercises
+
+Reference (Bookmark this page for exam. It will be very handy):
+
+https://kubernetes.io/docs/reference/kubectl/conventions/
+
+Create an NGINX Pod
+
+```bash
+kubectl run nginx --image=nginx
+```
+
+Generate POD Manifest YAML file (-o yaml). Don't create it(--dry-run)
+
+```bash
+kubectl run nginx --image=nginx --dry-run=client -o yaml > nginx-pod.yaml
+```
+
+Create a deployment
+
+```bash
+kubectl create deployment --image=nginx nginx
+```
+
+Generate Deployment YAML file (-o yaml). Don't create it(--dry-run) with 4 Replicas (--replicas=4)
+
+```bash
+kubectl create deployment --image=nginx nginx --replicas=4 --dry-run=client -o yaml > nginx-deployment.yaml
+```
+
+Save it to a file, make necessary changes to the file (for example, adding more replicas) and then create the deployment.
+
+```bash
+kubectl create -f nginx-deployment.yaml
+```
+
+OR
+
+In k8s version 1.19+, we can specify the --replicas option to create a deployment with 4 replicas.
+
+```bash
+kubectl create deployment --image=nginx nginx --replicas=4 --dry-run=client -o yaml > nginx-deployment.yaml
+```
+
+## Lab. Deployments
+
+Algunos comandos utilizados:
+
+```bash
+kubectl get pods
+kubectl get rs
+kubectl get deploy
+kubectl get deploy -o wide
+kubectl apply -f deployment-definition-1.yaml
+kubectl create deployment --image=httpd:2.4-alpine httpd-fronted --replicas=3 --dry-run=client -o yaml > mydeployment.yaml
+```
+
+## Recap. Services
+
+Consultar el capítulo **[Services]** en los apuntes siguientes:
+
+> `20220711-kubernetes-for-the-absolute-beginners`.
+
+## Lab. Services
+
+Algunos comandos utilizados:
+
+```bash
+kubectl get svc
+kubectl get svc -o wide
+kubectl describe svc
+```
+
+## Namespaces
+
+### Namespaces en kubernetes
+
+Un `namespace` es un espacio aislado de nombres, es decir, un conjuntos de nombres utilizados para identificar y hacer referencia a un conjunto de objetos. El namespace asegura que todos los objetos que aloja tienen un nombre único. 
+
+Cuando se configura un clúster de kubernetes, se crean automáticamente los siguientes namespaces:
+
+- `default`
+- `kube-system` contiene los pods y servicios para propósitos internos requeridos para la solución de networking.
+- `kube-public` alojará los recursos que deben ser accesibles para todos los usuarios.
+
+En el ámbito empresarial, los clusters típicamente tienen bastante namespaces.
+
+Hay muchas posibles soluciones para aislar los entornos de DEV y de PRO (clusteres diferentes usando contextos). Una de ellas es utilizar un namespace llamo `Dev` y otro namespace llamado `Pro`. 
+
+Cada uno de estos namespaces tiene:
+
+- Sus propias políticas que definan los distintos permisos. 
+- Distintas asignaciones respecto a los límites y usos de recursos.
+
+### Namespaces - DNS
+
+Tenemos un cluster con los siguientes namespaces:
+
+```latex
+ +--------------------------------------------------+
+ | Cluster                                          |
+ +--------------------------------------------------+
+------------------------------------------------------
+ +----------------+----------------+
+ | NS - default   | NS - dev       |
+ | +------------+ | +------------+ |
+ | | web-pod    | | | web-pod    | |
+ | +------------+ | +------------+ |
+ | +------------+ | +------------+ |
+ | | db-service | | | db-service | |
+ | +------------+ | +------------+ |
+ | +------------+ | +------------+ |
+ | | web-deploy | | | web-deploy | |
+ | +------------+ | +------------+ |
+ +----------------+----------------+
+```
+
+En este caso, la web-app del ns Default puede alcanzar el db-service de su namespace simplemente utilizando el hostname `db-service`
+
+```bash
+mysql.connect("db-service")
+```
+
+Sin embargo, si quiere alcanzar el db-service del ns Dev, debe utilizar el nombre siguiente
+
+```bash
+mysql.connect("db-service.dev.svc.cluster.local")
+```
+
+Esto es así porque, cuando el servicio es creado, automáticamente se añade una entrada DNS con este formato:
+
+- `cluster.local` es el nombre de `dominio` por defecto del cluster de kubernetes.
+- `svc` es el `subdominio` para el servicio
+- `dev` es el `namespace`
+- `db-service` es el `nombre` del servicio
+
+## Algunos comandos relacionados con el namespace
+
+Listar pods:
+
+```bash
+kubectl get pods #lista en el ns default
+kubectl get pods -n kube-system
+```
+
+Crear pods:
+
+```bash
+kubectl create -f pod-definition.yaml #se aplica al ns default
+kubectl create -f pod-definition.yaml -n dev
+```
+
+o alternativamente incluir en el manifiesto el siguiente metadata
+
+```yaml
+metadata:
+    namespace: dev
+```
+
+Crear un nuevo namepace. Se puede hace con el siguiente manifiesto
+
+```yaml
+#namespace-pro.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+    name: pro
+spec:
+```
+
+y ejecutando
+
+```bash
+kubectl create -f namespace-pro.yaml
+```
+
+O alternativamente, directamente se puede ejecutar:
+
+```bash
+kubectl create namespace pro
+```
+
+Hacer switch de un namespace a otro:
+
+```bash
+kubectl config set-context $(kubectl config current-context) --namespace=dev
+```
+
+donde `$(kubectl config current-context)` nos devuelve el contexto actual, concepto que todavía no hemos tocado y que se verá más adelante. El contexto viene a ser el cluster actual con el que estamos interaccionando dentro de un contexto de múltiples clústers.
+
+Para listar los pods de todos los namespaces, se ejecuta:
+
+```bash
+kubectl get pods --all-namespaces
+```
+
+### Resource Quota
+
+Podemos utilizar el objeto `ResourceQuota` para establecer, por ejemplo, los límites de memoria y CPU en un determinado namespace.
+
+Utilzaremos un manifiesto como el siguiente:
+
+```yaml
+#compute-quota.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+    name: compute-quota
+    namespace: dev
+spec:
+    hard:
+        pods: "10"
+        requests.cpu: "4"
+        requests.memory: 5Gi
+        limits.cpu: "10"
+        limits.memory: 10Gi
+```
+
+y lo crearemos ejecutando
+
+```bash
+kubectk create -f compute-quota.yaml
+```
