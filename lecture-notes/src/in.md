@@ -560,54 +560,6 @@ Consultar la sección correspondiente dentro de **[Conceptos de kubernetes: Pods
 
 > `20220711-kubernetes-for-the-absolute-beginners`.
 
-## Certification tip
-
-As you might have seen already, it is a bit difficult to create and edit YAML files. Especially in the CLI. During the exam, you might find it difficult to copy and paste YAML files from browser to terminal. Using the kubectl run command can help in generating a YAML template. And sometimes, you can even get away with just the kubectl run command without having to create a YAML file at all. For example, if you were asked to create a pod or deployment with specific name and image you can simply run the kubectl run command.
-
-Use the below set of commands and try the previous practice tests again, but this time try to use the below commands instead of YAML files. Try to use these as much as you can going forward in all exercises
-
-Reference (Bookmark this page for exam. It will be very handy):
-
-https://kubernetes.io/docs/reference/kubectl/conventions/
-
-Create an NGINX Pod
-
-```bash
-kubectl run nginx --image=nginx
-```
-
-Generate POD Manifest YAML file (-o yaml). Don't create it(--dry-run)
-
-```bash
-kubectl run nginx --image=nginx --dry-run=client -o yaml > nginx-pod.yaml
-```
-
-Create a deployment
-
-```bash
-kubectl create deployment --image=nginx nginx
-```
-
-Generate Deployment YAML file (-o yaml). Don't create it(--dry-run) with 4 Replicas (--replicas=4)
-
-```bash
-kubectl create deployment --image=nginx nginx --replicas=4 --dry-run=client -o yaml > nginx-deployment.yaml
-```
-
-Save it to a file, make necessary changes to the file (for example, adding more replicas) and then create the deployment.
-
-```bash
-kubectl create -f nginx-deployment.yaml
-```
-
-OR
-
-In k8s version 1.19+, we can specify the --replicas option to create a deployment with 4 replicas.
-
-```bash
-kubectl create deployment --image=nginx nginx --replicas=4 --dry-run=client -o yaml > nginx-deployment.yaml
-```
-
 ## Lab. Deployments
 
 Algunos comandos utilizados:
@@ -786,4 +738,305 @@ y lo crearemos ejecutando
 
 ```bash
 kubectk create -f compute-quota.yaml
+```
+
+## Lab. Namespaces
+
+Algunos comandos utilizados:
+
+```bash
+kubectl get ns --no-headers | wc -l
+kubectl get pods -n research --no-headers | wc -l
+kubectl run redis --image=redis -n finance
+kubectl get pods --all-namespaces
+kubectl get svc --all-namespaces
+```
+
+## Imperative vs Declarative
+
+### Aproximación imperativa y declarativa en kubernetes
+
+En el mundo de la IaaC o Infraestructura como código, existen dos aproximaciones distintas para el mantenimiento y gestión de la infraestructura:
+
+- `Forma imperativa` Se especifican las instrucciones que hay que seguir.
+- `Forma declarativa` Se especifica el resultado final deseado.
+
+**Forma imperativa**
+
+1. Aprovisionar una vm con el nombre de "web-server".
+2. Instalar el software nginx en la máquina.
+3. Editar el archivo de configuración para usar el puerto "8080".
+4. Editar el archivo de configuración a la ruta web "/var/www/nginx"
+5. Cargar las páginas web a "/var/www/nginx" con GIT Repo - X.
+6. Iniciar el servidor nginx.
+
+**Forma declarativa**
+
+```yaml
+VM Name: werb-server
+Package: nginx
+Path: /var/www/nginx
+Code: GIT Repo - X
+```
+
+Existen muchas herramientas devops conocidas como Ansible, Puppet, Chef o Terraform que utilizan la aproximación declarativa:
+
+En kubernetes utilizamos una **aproximación imperativa** cuando ejecutamos comandos como los siguientes
+
+```bash
+kubectl run --image=nginx nginx
+kubectl create deployment --image=nginx nginx
+kubectl expose deployment nginx --port 80 
+kubectl edit deployment nginx
+kubectl scale deployment nginx --replicas=5 
+kubectl set image deployment nginx nginx=nginx:1.18
+kubectl create -f nginx.yaml
+kubectl replace -f nginx.yaml
+kubectl delete -f nginx.yaml
+```
+
+en ocasiones, sobre un manifiesto `nginx.yaml`.
+
+La **aproximación imperativa** de kubernetes se pone en práctica cuando creamos un manifiesto `nginx.yaml` y utilizamos el comando
+
+```bash
+kubectl apply -f nginx.yaml
+```
+
+que servirá para aplicar el estado deseado en el manifiesto. En esta aproximación se utiliza el comando `apply` tanto para crear como para actualizar o borrar un objeto.
+
+### Comandos imperativos
+
+Para crear un objeto:
+
+```bash
+kubectl run --image=nginx nginx
+kubectl create deployment --image=nginx nginx
+kubectl expose deployment nginx --port 80 
+```
+
+Para actualizar un objeto:
+
+```bash
+kubectl edit deployment nginx
+kubectl scale deployment nginx --replicas=5 
+kubectl set image deployment nginx nginx=nginx:1.18
+```
+
+Los comandos anteriores solo se utilizan una vez y tras ejecutarlos no olvidamos de ellos. No es la mejor forma de trabajar en un entorno empresarial, pero puede ser utilir para superar un examen de certificación.
+
+### Archivos de configuración de objetos imperativos
+
+La primera ventaja en el uso de archivos de configuración es que estos archivos pueden almacenarse en un repositorio y podemos tener un control de versiones sobre ellos:
+
+```yaml
+#nginx.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp
+  labels: 
+    app: myapp
+    type: front-end
+spec:
+  containers:
+    - name: nginx-container
+      image: nginx
+```
+
+Para crear un objeto:
+
+```bash
+kubectl create -f nginx.yaml
+```
+
+Para actualizar un objeto:
+
+**Opción 1. No tan recomendada** Una opción es ejecutar
+
+```bash
+kubectl edit deployment nginx
+```
+
+para que se abra un archivo de definición yaml muy similar al que `nginx.yaml` que hemos utilizado para crear los pods pero con algún campo adicional apra almacenar el estado:
+
+```yaml
+#pod-definition
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp
+  labels: 
+    app: myapp
+    type: front-end
+spec:
+  containers:
+    - name: nginx-container
+      image: nginx:1.18
+status:
+  conditions:
+  - lastProbeTime: null
+    status: "True"
+    type: Initialized
+```
+
+Los cambios que hagamos sobre este archivo, se aplicarán sobre los pods que se están ejecutando. Sin embargo, observar en el ejemplo la diferencia existente entre los dos archivos de configuración. En el manifiesto aparece la imagen `nginx` y en el archivo de estado aparece la imagen `nginx:1.18`. Esto es porque reaamente, **el comando edit no se graba en ningún sitio después de que el cambio es efectuado**. 
+
+Si en el futuro, alguien quiere modificar el archivo local del manifiesto yaml, no sabrá que otra persona (o ella misma) realizó en el pasado un cambio utilizando el comando kubectl.
+
+**Opción 2. Recomendada** La mejor opción es modificar el manifiesto yaml original para cambiar, por ejemplo, la imagen a `nginx:1.18` y ejecutar el comando
+
+```bash
+kubectl replace -f nginx.yaml
+```
+
+y de esta forma se puede hacer un control de las distintas versiones.
+
+En el caso de que se quiera una destrucción y recreación completa del objeto se utilizará el flag `--force`, es decir, se ejecutará el comando
+
+```bash
+kubectl replace --force -f nginx.yaml
+```
+
+Es importante saber, que si el objeto ya esta creado y se utiliza el comando `create`
+saltará un error. Y del mismo modo, se producirá un error si el objeto no está creado y se intenta ejecutar un `replace`. 
+
+Esto último es una desventaja frente a la aproximación declarativa que estamos a punto de tratar.
+
+### Aproximación declarativa en kubernetes
+
+En esta aproximación se trabaja siempre con el mismo manifiesto `nginx.yaml`
+
+```yaml
+#nginx.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp
+  labels: 
+    app: myapp
+    type: front-end
+spec:
+  containers:
+    - name: nginx-container
+      image: nginx
+```
+
+Para crear un objeto se utiliza el comando inteligente
+
+```bash
+kubectl apply -f nginx.yaml
+```
+
+que creará un objeto en el caso de que no exista. En el caso de que existan **varios archivos de configuración de objetos** en la ruta `/path/to/config-files`, algo habitual, se puede utilizar el comando
+
+```bash
+kubectl apply -f /path/to/config-files
+```
+para crear a la vez todos los objetos.
+
+Para actualizar un objeto, simplemente actualizamos su manifiesto y ejecutamos el mismo comando de nuevo
+
+```bash
+kubectl apply -f nginx.yaml
+```
+
+## Tips. Comandos imperativos con kubectl
+
+En los siguient comandos kubectl, son útiles las siguientes dos opciones:
+
+- `--dry-run=client` Utilizando esta opción, el recurso no será creado. Sirve para saber si se puede crear el recurso.
+- `-o yaml` Está opción permite imprimir en la pantalla la definición del recurso en formato yaml.
+
+Las opciones anteriores se pueden combinar para generar rápidamente una plantilla para un manifiesto yaml.
+
+### Pods
+
+Create an NGINX Pod
+
+```bash
+kubectl run nginx --image=nginx
+```
+
+Generate POD Manifest YAML file . Don't create it
+
+```bash
+kubectl run nginx --image=nginx --dry-run=client -o yaml > nginx-pod.yaml
+```
+
+### Deployments
+
+Create a deployment
+
+```bash
+kubectl create deployment --image=nginx nginx
+```
+
+Generate Deployment YAML file. Don't create it
+
+```bash
+kubectl create deployment --image=nginx nginx --dry-run=client -o yaml > nginx-deployment.yaml
+```
+
+Generate Deployment with 4 Replicas
+
+```bash
+kubectl create deployment nginx --image=nginx --replicas=4
+```
+
+You can also scale a deployment using the kubectl scale command.
+
+```bash
+kubectl scale deployment nginx --replicas=4
+```
+
+Another way to do this is to save the YAML definition to a file and modify
+
+### Services
+
+Create a Service named redis-service of type ClusterIP to expose pod redis on port 6379
+
+```bash
+kubectl expose pod redis --port=6379 --name redis-service --dry-run=client -o yaml
+```
+
+(This will automatically use the pod's labels as selectors)
+
+Or
+
+```bash
+kubectl create service clusterip redis --tcp=6379:6379 --dry-run=client -o yaml
+```
+
+(This will not use the pods labels as selectors, instead it will assume selectors as app=redis. You cannot pass in selectors as an option. So it does not work very well if your pod has a different label set. So generate the file and modify the selectors before creating the service)
+
+Create a Service named nginx of type NodePort to expose pod nginx's port 80 on port 30080 on the nodes:
+
+```bash
+kubectl expose pod nginx --type=NodePort --port=80 --name=nginx-service --dry-run=client -o yaml
+```
+
+(This will automatically use the pod's labels as selectors, but you cannot specify the node port. You have to generate a definition file and then add the node port in manually before creating the service with the pod.)
+
+Or
+
+```bash
+kubectl create service nodeport nginx --tcp=80:80 --node-port=30080 --dry-run=client -o yaml
+```
+
+(This will not use the pods labels as selectors)
+
+Both the above commands have their own challenges. While one of it cannot accept a selector the other cannot accept a node port. I would recommend going with the kubectl expose command. If you need to specify a node port, generate a definition file using the same command and manually input the nodeport before creating the service.
+
+References:
+
+- [https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands](https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands)
+- [https://kubernetes.io/docs/reference/kubectl/conventions/](https://kubernetes.io/docs/reference/kubectl/conventions/)
+
+## Lab. Imperative commands
+
+Algunos comandos utilizados:
+
+```bash
+
 ```
