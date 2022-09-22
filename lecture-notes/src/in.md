@@ -1038,5 +1038,31 @@ References:
 Algunos comandos utilizados:
 
 ```bash
-
+kubectl run nginx-pod --image=nginx:alpine
+kubectl run redis --image=redis:alpine --labels tier=db 
+kubectl expose pod redis --port=6379 --name redis-service #svc ClusterIP
+kubectl create deployment webapp --image=kodekloud/webapp-color --replicas=3
+kubectl run custom-nginx --image=nginx --port=8080
+kubectl create namespace dev-ns
+kubectl create deployment redis-deploy --image=redis --replicas=2 -n dev-ns
+kubectl run httpd --image=httpd:alpine --port=80 --expose #svc ClusterIP
 ```
+
+## Comando kubectl apply
+
+Recordamos la forma de trabajar declarativamente consiste en:
+
+1. Modificar el manifiesto file.yaml donde se define el objeto de kubernetes. Lo llamaremos también `local file`.
+2. Ejecutar el comando `kubectl apply -f file.yaml` para que se lleven a cabo los cambios necesarios.
+
+Internamente esto funciona con tres conjuntos de datos:
+
+- `local file` manifiesto yaml de definición, almacenado localmente.
+- `live object configuration` yaml con el estado actual del objeto, almacenado en la memoria de kubernetes.
+- `last applied configurarion` json con los últimos cambios aplicados, almacenado en el archivo `live object configuration` dentro del campo `anotations`.
+
+Es muy importante no mezclar las aproximaciones imperativa y declarativa.
+
+# Scheduling
+
+## Introducción al Scheduling
