@@ -7,16 +7,21 @@
 # original en https://gist.github.com/bertvv/e77e3a5d24d8c2a9bcc4
 
 # Directory containing source (Markdown) files
-source := src
-
+source := make/src
 # Directory containing pdf files
-output := print
+output := ./
+# Directory containing template.tex, preamble.tex, *.theme
+config := make/config
+# Directory containing metadata.yaml
+metadata := make
+# Others
+PDF_ENGINE := xelatex
 
 # All markdown files in src/ are considered sources
 sources := $(wildcard $(source)/*.md)
 
-# Convert the list of source files (Markdown files in directory src/)
-# into a list of output files (PDFs in directory print/).
+# Convert the list of source files (Markdown files in directory source)
+# into a list of output files (PDFs in directory output).
 objects := $(patsubst %.md,%.pdf,$(subst $(source),$(output),$(sources)))
 
 all: $(objects)
@@ -25,11 +30,11 @@ all: $(objects)
 $(output)/%.pdf: $(source)/%.md
 	pandoc \
 		-f markdown  $< \
-		--template=config/template.tex \
-		--metadata-file=metadata.yaml \
-		--include-in-header config/preamble.tex \
-		--highlight-style config/pygments.theme \
-		--pdf-engine=xelatex \
+		--template=$(config)/template.tex \
+		--metadata-file=$(metadata)/metadata.yaml \
+		--include-in-header $(config)/preamble.tex \
+		--highlight-style $(config)/*.theme \
+		--pdf-engine=$(PDF_ENGINE) \
 		-o $@
 
 # '$<' represents the source file on which make is currently operating 

@@ -1,18 +1,12 @@
 ---
-# document
 title: "Certified Kubernetes Administrator (CKA) with Practice Tests"
 subtitle: "Por Mumshad Mannambeth"
 author: "Notas de Roberto Negro"
 date: 11/08/2022
-# configuration
 lang: es-ES
 numbersections: true
 toc: true
-toccolor: gray
-# colorlinks
+toccolor: TOCCOLOR2
 colorlinks: true
-urlcolor: blue
-#linkcolor: blue
-#citecolor: green
-#anchorcolor: green
+urlcolor: URLCOLOR1
 ---
