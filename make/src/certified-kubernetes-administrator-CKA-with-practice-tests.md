@@ -1065,4 +1065,55 @@ Es muy importante no mezclar las aproximaciones imperativa y declarativa.
 
 # Scheduling
 
-## Introducción al Scheduling
+## Scheduling manual
+
+Vamos a ver como funciona el scheduling de kubernetes.
+
+Todos los pods tienen el campo `spec.nodeName`. Lo habitual es que este campo no se configure en el manifiesto y que kubernetes lo añada automáticamente.
+
+El scheduler examina todos los pods en busca de aquellos que no tienen configurada esta propiedad y los asigna un nodo creando un `binding object`.
+
+En el caso de que no exista un scheduler para monitorizar y asignar nodos, el pod se quedaría en el estado de `pending`. 
+
+Sin scheduler, la forma manual más sencilla de asignar un nodo a un pod es indicarlo en su manifiesto. Esto debe hacerse antes de crear el pod
+
+```yaml
+#pod-definition
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  labels: 
+    app: mginx
+spec:
+  containers:
+    - name: nginx
+      image: nginx
+      ports: 
+        - containerPort: 8080
+  nodeName: node02
+```
+
+En el caso de que el pod ya este creado, podemos modificar el nodo que un pod tiene asignado creando un objeto de tipo `Binding`
+
+```yaml
+apiVersion: v1
+kind: Binding
+metadata:
+  name: nginx
+target:
+  apiVersion: v1
+  kind: Node
+  name: node02
+```
+
+y lanzando un POST request a la binding API del pod
+
+```bash
+curl --header "Content-Type:application/json"  --request POST --data '{"apiVersion":"v1", "kind":"Binding" ... }' http://$SERVER/api/namespaces/default/pods/binding/
+```
+
+Observar que esto requiere convertir el archivo yaml a formato json.
+
+## 
+
