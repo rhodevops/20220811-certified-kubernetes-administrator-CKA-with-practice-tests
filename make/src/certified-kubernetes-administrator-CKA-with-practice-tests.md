@@ -1115,5 +1115,193 @@ curl --header "Content-Type:application/json"  --request POST --data '{"apiVersi
 
 Observar que esto requiere convertir el archivo yaml a formato json.
 
-## 
+## Lab. Manual Scheduling
+
+Creamos un pod y vemos que se queda en estado `pending`:
+
+```bash
+> kubectl create -f nginx.yaml
+> kubectl get pods
+NAME    READY   STATUS    RESTARTS   AGE
+nginx   0/1     Pending   0          23s
+```
+
+Para revisar lo que sucede
+
+```bash
+> kubectl describe node controlplane
+> kubectl get pods --namespace kube-system
+```
+
+En este caso es un cluster donde el scheduler debería esta desplegado como pod y no vemos que lo este. Hay que hacer la asginación de nodos manual.
+
+Para resolverlo, eliminamos el pod, modificamos su manifiesto incluyendo la propiedad `spec.nodeName` para asignarle el nodo correspondiente y lo volvemos a crear.
+
+## Labels y Selectors
+
+En kubernetes, los `labels` y `selectors` se utilizan para agrupar y seleccionar los objetos de kubernetes que nos interesen a la hora de realizar una acción contra ellos, por ejemplo configurar un servicio para un conjunto de pods.
+
+Uno de los usos más habituales es vincular un objeto con otro, por ejemplo los replicasets con los pods.
+
+También podemos usar `annotations` para guardar datos con un propósito meramente informatico.
+
+Para filtrar pods con un determinado label podemos ejecutar
+
+```bash
+kubectl ger pods -l <label>=<value>
+```
+
+## Lab. Labels y Selectors
+
+Comenzamos filtrando el número de pods que tienen la siguiente etiqueta
+
+```bash
+kubectl get pods -l env=dev | wc -l
+```
+
+Filtramos todos los objetos que tiene las siguiente etiqueta
+
+```bash
+kubectl get all env=prod
+```
+
+Filtramos el pod que tiene las siguiente etiquetas
+
+```bash
+kubectl get all -l env=prod,bu=finance,tier=fronted
+```
+
+## Taints y Tolerations
+
+Se pueden establcer restricciones en la tarea de asignación de nodos a los pods. 
+
+Los tails y tolerations ser utilizan para restringir el acceso a un nodo solamente a los pods que tengan una cierta tolerancia. Esto no quiere decir que un pod con tolerancia contra un nodo deba asigarse necesariamente a dicho nodo:
+
+- `Tail` se refiere a la mancha, característica o restricción que impone el nodo
+- `Tolerantions` se refiere a la tolerancia de un pod respecto al taint del nodo
+
+Podemos tener el siguiente escenario
+
+- pods GB1, GB2, GB3, RGB4
+- nodo A `taint=red`
+- nodo B `taint=green`
+- nodo C `taint=blue`
+
+en el que suponemos que solo el pod RGB4 tolera la mancha roja. En este caso solamente el pod RGB4 puede ser asignado al nodo A, pero aún así podría acabar en otro nodo.
+
+Para establecer un taint es un nodo se puede utilizar la siguiente orden
+
+```bash
+kubectl taint nodes <node name> <key>=<value>:<taint-effect>
+```
+
+donde el taint-effect indica lo que les sucede a los pods que no toleran dicho taint. Hay tres tipos:
+
+- `NoSchedule` no es asignado
+- `PreferNoSchedule` preferiblemente pero no hay garantia de que no sea asignado
+- `NoExecute` no es asignado y los antiguos no tolerantes que ya se ejecutaban en el nodo son expulsados (los antiguos deben reprogramarse antes de aplicar el taint)
+
+Por ejemplo, para configurar un taint sobre un nodo se ordena
+
+```bash
+kubectl taint nodes node01 app=red:NoSchedule
+```
+
+Y la tolerancia de un pod respecto al taint se añade en el manifiesto del pod
+
+```yaml
+#pod-definition.ysml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp-pod
+spec:
+  containers:
+  - name: nginx-container
+    image: nginx
+  tolerations:
+  - key: "app"
+    operator: "Equal"
+    value: "red"
+    effect: "NoSchedule"
+``` 
+
+**Importante** El uso de taint y tolerations no está pensado para forzar que ciertos pods se dirijan a un determinado nodo. Para ello existe otro concepto llamado `node affinity`.
+
+Sabemos que en un cluster de kubernetes se distinguen los nodos worker y el nodo master (control plane). Realmente el nodos master está capacitado para ejecutar pods pero, por diseño, no lo hace. Esto se consigue precisamente mediante un taint que previene que cualquier pod se programe en el master. Aunque se puede cambiar este comportamiento, es una mala práctica cambiarlo.
+
+Podemos comprobar lo anterior ejecutando
+
+```bash
+> kubectl describe node <nodo master> | grep Taint
+Taints:             node-role.kubernetes.io/control-plane:NoSchedule
+```
+
+## Lab. Tail y Tolerations
+
+Comprobamos el número de nodos y que node01 no tiene ninguna restricción
+
+```bash
+> kubectl get nodes
+> kubectl describe node node01 | grep Taint
+```
+
+Añadimos un Taint a node01
+
+```bash
+> kubectl taint node node01 spray=mortein:NoSchedule
+> kubectl describe node node01 | grep Taint
+Taints:             spray=mortein:NoSchedule
+```
+
+Creamos un pod que se queda en estado 'pending'
+
+```bash
+kubectl run nginx --image=nginx
+```
+
+El pod anterior intenta levantar pero no puede, se queda en 'pending'. El motivo es que el node01 tiene un taint y el pod que intentamos crear no tiene una tolerancia añadida.
+
+Creamos ahora un pod que si que tenga una tolerancia al taint. Por comodidad, podemos utilizar previamente la siguiente orden
+
+```bash
+kubectl run bee --image=nginx --dry-run=client > pod-definition.yaml
+```
+
+para luego editar el manifiesto creado
+
+```yaml
+#pod-definition.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bee
+spec:
+  containers:
+  - image: nginx
+    name: bee
+  tolerations:
+  - key: "spray"
+    operator: "Equal"
+    value: "mortein"
+    effect: "NoSchedule"
+```
+
+Al crear el pod con el manifiesto anterior, el pod se levanta correctamente al tener la tolerancia al taint.
+
+Comprobamos que el controlplane tiene una taint
+
+```bash
+> kubectl describe node <nodo master> | grep Taint
+Taints:             node-role.kubernetes.io/control-plane:NoSchedule
+```
+
+A continuación se la quitamos. Para ello se utiliza la misma orden con la que se crear añdiendo un guión al final
+
+```bash
+kubectl taint nodes controlplane node-role.kubernetes.io/control-plane:NoSchedule-
+```
+
+Al hacer esto, el pod `mosquito` cambia a running porque es asignado al nodo controlplane, que ahora no tiene restricciones.
+
 
