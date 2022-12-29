@@ -1717,3 +1717,307 @@ A copy of your changes has been stored to "/tmp/kubectl-edit-3773997892.yaml"
 ```
 
 ## Daemon Sets
+
+Un `Daemon Set`, al igual que un Replica-Set, se encarga de desplegar múltiples instancias de un pod. 
+
+La características que define al Daemon-Set es que siempore **coloca un pod en cada uno de los nodos** del cluster. Además, si se crea un nuevo nodo, el Daemon-Set despliega automáticamente el pod correspondiente en el nuevo nodo.
+
+Casos de uso:
+
+- Desplegar pods con tareas de monitorización
+- El componente `kube-proxy` se puede desplegar como Daemon-Set
+- Soluciones de networkin como `weave-net` que requieren de un agente desplegado en cada nodo
+
+El manifiesto utilizado para crear un Daemon-Set es muy similar al utilizado para desplegar un Replica-Set
+
+```yaml
+#daemon-set-definition
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: monitoring-daemon
+spec:
+  selector:
+    matchLabels:
+      app: monitoring-agent
+  template:
+    metadata:
+      labels:
+        app: monitoring-agent
+    spec:
+      containers:
+        - name: monitoring-agent
+          image: monitoring-agent
+```
+
+Después utilizamos los comandos habituales
+
+```bash
+> kubectl create -f daemon-set-definition.yaml
+> kubectl get daemonsets
+> kubectl describe daemonset monitoring-daemon
+```
+
+Como funciona el Daemon-Set:
+
+- **Hasta v1.12** Técnica de Scheduling (manual) utilizando la propiedad `nodeName: <node name>` en el manifiesto del pod antes de crearlo
+- **Desde v1.12** Utiliza reglas NodeAffinity
+
+## Lab. Daemon Sets
+
+Queremos crear un daemon-set llamado "elastic-search" en el ns kube-system con la imagen "k8s.gcr.io/fluentd-elasticsearch:1.20"
+
+```bash
+> kubectl create deploy elasticsearch --image=alpine
+> kubectl get replicasets
+NAME                       DESIRED   CURRENT   READY   AGE
+elasticsearch-56978c7777   1         1         0       58s
+> kubectl get replicasets elasticsearch-56978c7777 -o yaml > daemonset.yaml
+> kubectl delete deploy elasticsearch
+> vi daemonset.yaml
+piVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    app: elasticsearch
+  name: elasticsearch
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: elasticsearch
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+    spec:
+      containers:
+      - name: elasticsearch
+        image: k8s.gcr.io/fluentd-elasticsearch:1.20
+:wq
+> kubectl create -f daemonset.yaml
+```
+
+## Pods estáticos
+
+Vamos a imaginar un escenario en el que solo tenemos un nodo. Ni siguiera tenemos un controlplane, es decir, no tenemos ninguno de los siguientes elementos:
+
+- base de datos etcd
+- scheduler
+- kube-apiserver
+- controller-manager
+
+Tenemos por tanto un único nodo worker con su `kubelet`. Este kubelet es capaz de administrar el nodo de forma independiente. Sin embargo, no hay un cluster.
+
+Lo único que sabe hacer kubelet es crear pods. Pero nos podemos preguntar lo siguiente: ¿como puede kubelet crear un pod a través de un manifiesto sin la intervención del kube-apiserver?
+
+Pues lo cierto es que se puede configurar kubelet para que lea la definición del pod directamente de un directorio 
+(p.e. `/etc/kubernetes/manifests`) en el servidor donde se aloja el manifiesto yaml.
+
+Kubelet lee periodícamente el directorio asignado en el servidor y se asegura de:
+
+- Crear los pods definidos en los manifiestos
+- Mantener los pods vivos
+- Recrear los pods si se actualizan los manifiestos
+- Matar el pod si se elimina el manifiesto asociado
+
+Los pods creados de esta forma se denominan `pods estáticos`. kubelet siempre trabaja a nivel de pods y solo entiende de pods.
+
+El directorio de manifiestos designado puede ser cualquier localización en el host. 
+
+La localización del directorio se pasa a kubelet como opción mientras se ejecuta como servicio
+
+```bash
+# kubelet.service
+ExecStart=/usr/local/bin/kubelet \\ 
+    --container-runtime=remote \\
+    --container-runtime-endpoint=unix:///var/run/containerd/containerd.sock \\
+    --pod-manifest-path=/etc/kunbernetes/manifests \\
+    --kubeconfig=/var/lib/kubelet/kubeconfig \\
+    --network-plugin=cni \\
+    --register-node=true \\
+    --v=2
+```
+
+También se pude pasar la opción `--config=kubeconfig.yaml` en lugar de `--pod-manifest-path=/etc/kunbernetes/manifests` y configurar el path en el  `kubeconfig.yaml`
+
+```yaml
+#kubeconfig.yaml
+staticPodpath: /etc/kunbernetes/manifests
+```
+
+Los clusters configurados con Kube Admin utilizan esta última aproximación.
+
+En un cluster existente, habrá que buscar esta ruta en alguno de los dos sitios:
+
+- service
+- config file
+
+Una vez que se ha creado un pod estático podemos visualizarlo con el comando de docker
+
+```bash
+docker ps
+```
+
+¿Como funciona esto cuando el nodo si que forma parte de un cluster de kubernetes?
+
+- Kubelet puede crear pods via kube-apiserver y también puede crear pods estáticos
+- el controlplane se entera de que hay pods estáticos creados
+- `kubectl get pods` también lista pods estáticos
+- los pods estáticos se nombran con el sufijo `-<nodo name>` haciendo referencia al nodo donde se crea
+- los pods estáticos solo pueden eliminarse eliminando el manifiesto que los controla
+
+¿Cuales son los casos de uso de los pods estáticos?
+
+- Queremos pods que no dependan del controlplane
+- Ejemplo: componentes del controlplane 
+
+Ventajas de desplegar los componentes del control plane como pods estáticos
+
+- No tienes que descargar los binarios ni los servicios de configuración
+- No te preocupas por que se rompan los servicios
+- Si se rompe el servicio, al estar como pod estático, automáticamente se regenera
+
+En un cluster configurado de la forma que se acaba de describir, al listar los pods del kube-system aparecen los distintos componentes del controlplane.
+
+Es importante diferenciar los pods estáticos de los Daemon-Sets
+
+| Static pods                     | Daemon-Sets                                  |
+| ------------------------------- | -------------------------------------------- |
+| Creado por kubelet              | Creado por kube-apiserver                    | 
+| Componentes del control-plane   | Agentes de monitoring y logging en los nodos | 
+
+Tiene en común que ambos son ignorados por el Kube-Scheduler.
+
+## Lab. Static Pods
+
+Al ejecutar
+
+```bash
+> kubectl get pods --all-namespaces
+NAMESPACE     NAME                                   READY   STATUS    RESTARTS   AGE
+kube-system   coredns-6d4b75cb6d-gp4vv               1/1     Running   0          14m
+kube-system   coredns-6d4b75cb6d-nf2st               1/1     Running   0          14m
+kube-system   etcd-controlplane                      1/1     Running   0          15m
+kube-system   kube-apiserver-controlplane            1/1     Running   0          15m
+kube-system   kube-controller-manager-controlplane   1/1     Running   0          15m
+kube-system   kube-flannel-ds-rgxxn                  1/1     Running   0          14m
+kube-system   kube-flannel-ds-vdrt4                  1/1     Running   0          14m
+kube-system   kube-proxy-4nd7l                       1/1     Running   0          14m
+kube-system   kube-proxy-z5hmd                       1/1     Running   0          14m
+kube-system   kube-scheduler-controlplane            1/1     Running   0          15m
+```
+
+observamos que existen 4 pods estáticos situados en el controlplane (por la terminación en el nombre)
+
+Para ver la localización de manifiestos para pos estáticos ejecutamos
+
+```bash
+> ps -aux | grep kubelet | grep config 
+root        2357  0.0  0.0 4153696 93944 ?       Ssl  16:15   0:41 /usr/bin/kubelet --bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf --config=/var/lib/kubelet/config.yaml --container-runtime=remote --container-runtime-endpoint=unix:///var/run/containerd/containerd.sock --pod-infra-container-image=k8s.gcr.io/pause:3.7
+```
+
+y obsevamos que se utiliza el archivo de configuración `/var/lib/kubelet/config.yaml` luego hay que ejecutar
+
+```bash
+> cat /var/lib/kubelet/config.yaml
+apiVersion: kubelet.config.k8s.io/v1beta1
+authentication:
+  anonymous:
+    enabled: false
+  webhook:
+    cacheTTL: 0s
+    enabled: true
+  x509:
+    clientCAFile: /etc/kubernetes/pki/ca.crt
+authorization:
+  mode: Webhook
+  webhook:
+    cacheAuthorizedTTL: 0s
+    cacheUnauthorizedTTL: 0s
+cgroupDriver: systemd
+clusterDNS:
+- 10.96.0.10
+clusterDomain: cluster.local
+cpuManagerReconcilePeriod: 0s
+evictionPressureTransitionPeriod: 0s
+fileCheckFrequency: 0s
+healthzBindAddress: 127.0.0.1
+healthzPort: 10248
+httpCheckFrequency: 0s
+imageMinimumGCAge: 0s
+kind: KubeletConfiguration
+logging:
+  flushFrequency: 0
+  options:
+    json:
+      infoBufferSize: "0"
+  verbosity: 0
+memorySwap: {}
+nodeStatusReportFrequency: 0s
+nodeStatusUpdateFrequency: 0s
+resolvConf: /run/systemd/resolve/resolv.conf
+rotateCertificates: true
+runtimeRequestTimeout: 0s
+shutdownGracePeriod: 0s
+shutdownGracePeriodCriticalPods: 0s
+staticPodPath: /etc/kubernetes/manifests
+streamingConnectionIdleTimeout: 0s
+syncFrequency: 0s
+volumeStatsAggPeriod: 0s
+```
+
+o de manera más rápida y aprovenchando para listar ya los manifiestos que contiene
+
+```bash
+> cat /var/lib/kubelet/config.yaml | grep staticPodPath
+staticPodPath: /etc/kubernetes/manifests
+ls /etc/kubernetes/manifests/
+etcd.yaml  kube-apiserver.yaml  kube-controller-manager.yaml  kube-scheduler.yaml
+```
+
+Creamos el siguiente pod estático:
+
+```bash
+> vi /etc/kubernetes/manifests/static-pod.yaml
+:wq
+> cat /etc/kubernetes/manifests/static-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: static-busybox
+  name: static-busybox
+spec:
+  containers:
+  - command:
+    - sleep
+    - "1000"
+    image: busybox:1.28.4
+    name: static-busybox
+```
+
+Eliminamos un pod estático situado en otro nodo:
+
+```bash
+controlplane > kubectl get pods
+NAME                          READY   STATUS    RESTARTS   AGE
+static-busybox-controlplane   1/1     Running   0          65s
+static-greenbox-node01        1/1     Running   0          47s
+controlplane > ssh node01
+root@node01 > ps -aux | grep kubelet | grep config 
+root        7753  0.0  0.0 4003672 81532 ?       Ssl  17:03   0:04 /usr/bin/kubelet --bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf --config=/var/lib/kubelet/config.yaml --container-runtime=remote --container-runtime-endpoint=unix:///var/run/containerd/containerd.sock --pod-infra-container-image=k8s.gcr.io/pause:3.7
+root@node01 > cat /var/lib/kubelet/config.yaml | grep staticPodPath
+root@node01 > cat /var/lib/kubelet/config.yaml | grep staticPodPath
+staticPodPath: /etc/just-to-mess-with-you
+root@node01 > ls /etc/just-to-mess-with-you
+greenbox.yaml
+root@node01 > rm /etc/just-to-mess-with-you/greenbox.yaml 
+```
+
+
+
+
+
+
+
