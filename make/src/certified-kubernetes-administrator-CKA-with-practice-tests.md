@@ -1304,4 +1304,416 @@ kubectl taint nodes controlplane node-role.kubernetes.io/control-plane:NoSchedul
 
 Al hacer esto, el pod `mosquito` cambia a running porque es asignado al nodo controlplane, que ahora no tiene restricciones.
 
+## Node Selectors
 
+Lod `Node Selectors` se utilizar para forzar a los pods a que se ejecuten en un determinado nodo.
+
+Suponemos que tenemos un clúster de 4 nodos. El node-1 es "grande", dedicado a procesar datos, node-2 y nodo-3 son "pequeños" y node-4 es "mediano". Nos interesa que los pods dedicados a procesar datos se ejecutan en el nodo grande. Hay dos formas de hacerlo:
+
+- Node Selector
+- Node Affinity
+
+El Node Selector se utiliza en el manifiesto del pod para forzarlo a que se ejecute en un determinado nodo:
+
+```yaml
+apiVersion:
+kind: Pod
+metadata:
+  name: myapp-pod
+spec:
+  containers:
+  - name: data-processor
+  - image: data-processor
+
+  nodeSelector:
+    size: Large
+```
+
+pero antes de poder utilizar, debemos etiquetar el correspondiente nodo. Podemos utilizar la siguiente orden:
+
+```bash
+> kubectl label nodes <node name> <label key>=<label value>
+```
+
+En este caso:
+
+```bash
+> kubectl labek nodes node-1 size=Large
+```
+
+La técnica del Node Selector tiene algunos límites. No podemos utilizar condiciones más complejas como las siguientes:
+
+- Ejecutar un pod en el nodo Large o Medium
+- Ejecutar un pod en cualquier nodo excepto los Small
+
+Para lo anterior, debemos utilizar otro concepto llamado Node Affinity
+
+## Node Affinity
+
+`Node Affinity` se utiliza para seleccionar los nodos en los que queremos que se ejecuten algunos pods.
+
+El Node Affinity es una técnica más poderosa que la del Node Selector. Aparece en el manifiesto del pod de la siguiente forma:
+
+```yaml
+apiVersion:
+kind: Pod
+metadata:
+  name: myapp-pod
+spec:
+  containers:
+  - name: data-processor
+  - image: data-processor
+
+  affinity:
+    nodeAffinity:           
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: size
+            operator: In
+            values:
+            - Large
+```
+
+Algunas expresiones de mayor complejidad son las siguientes. 
+
+Se limita a los nodos de tamaño Large o Medium:
+
+```yaml
+- key: size
+  operator: In
+  values:
+  - Large
+  - Medium
+```
+
+Se excluyen los nodos de tamaño Small:
+
+```yaml
+- key: size
+  operator: NotIn
+  values:
+  - Small
+```
+
+Se limita a los nodos con etiqueta "size":
+
+```yaml
+- key: size
+  operator: Exists
+```
+
+Que ocurre si la condición establecida no se cumple (p.e. no existe ningun pod con etiqueta "size") o si las etiquetas de un nodo cambian en un futuro. ¿El pod es expulsado del nodo en este último cado? Pues todo depende del tipo de afinidad establecida.
+
+Tenenemos las siguiente reglas de Node Affinity disponibles
+
+- `requiredDuringSchedulingIgnoredDuringExecution` Tipo 1
+- `preferredDuringSchedulingIgnoredDuringScheduling` Tipo 2
+- `preferredDuringSchedulingRequiredDuringExecution` Tipo 3
+
+En forma de tabla:
+
+| REgla  | DuringScheduling | DuringExecution |
+| ------ | ---------------- | --------------- |
+| Tipo 1 | Required         | Ignored         |
+| Tipo 2 | Preferred        | Ignored         |
+| Tipo 3 | Required         | Required        |
+
+
+`DuringScheduling` y `DuringExecution` se refiere a dos estados en el ciclo de vida de un pod: cuando aun no existe y se crea, y cuando ya está ejecutándose. El efecto de las reglas de afinidad puede ser:
+
+- `Required` la regla es de obligado cumplimiento
+- `Prefered` solo se cumple si hay nodos que satisfagan la regla
+- `Ignore` se ignora la regla
+
+Observar que si se elimina un label de un nodo, los pods con una regla affinity de tipo 3 asociada a ese label son expousados del nodo.
+
+## Lab. Node Affinity
+
+Una alternativa al subcomando `describe` para listar los labels de un nodo, es utilizar
+
+```bash
+> kubectl get node node01 --show-labels
+```
+
+Configuramos un label para node01
+
+```bash
+> kubectl label node node01 color=blue
+```
+
+Creamos un deployment de nginx con 3 replicas
+
+```bash
+> kubectl create deployment nginx --image=nginx --replicas=3 --dry-run=client -o yaml  > deployment.yaml
+> vim deployment.yaml
+> kubectl create -f deployment.yaml
+```
+
+Hacemos un `kubectl describe` y comprobamos que ninguno de los nodos tiene taints (node01 y controlplane)
+
+Configuramos un Node Affinity en el deployment para que los pods solo se ejecuten en el node01
+
+```
+> vim deployment.yaml
+[...]
+affinity:
+       nodeAffinity:
+         requiredDuringSchedulingIgnoreDuringExecution:
+           nodeSelectorTerms:
+           - matchExpressions:
+             - key: color
+               operator: In
+               values:
+               - blue 
+> kubectl apply -f deployment.yaml
+```
+
+Creamos un nuevo deployment con 2 replicas cuyos nodos solo se van a ejecutar en el controlplane
+
+Consultamos los label del controlplane
+
+```bash
+> kubectl get nodes controlplane --show-labels 
+NAME           STATUS   ROLES           AGE   VERSION   LABELS
+controlplane   Ready    control-plane   63m   v1.24.0   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kubernetes.io/arch=amd64,kubernetes.io/hostname=controlplane,kubernetes.io/os=linux,node-role.kubernetes.io/control-plane=,node.kubernetes.io/exclude-from-external-load-balancers=
+```
+
+Creamos el deployment
+
+```bash
+> kubectl create deployment red --image=nginx --replicas=2 --dry-run=client -o yaml > redDeployment.yaml
+> vim redDeployment.yaml
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+```
+
+## Taints y Tolerations vs Node Affinity
+
+Cosas que hay que tener claras:
+
+- La técnica taints/tolerations **prohibe** a los pods no tolerantes ejecutarse en el nodo.
+- La técnica taints/tolerations no garantiza que un pod tolerante se ejecute en el nodo que tolera.
+- La técnica Node Affinity **obliga** a los pods etiquetados a ejecutarse en un nodo.
+- La técnica Node Affinity no garantiza que un pod no etiquetado se ejecute en un nodo distinto.
+
+## Requerimiento y límites de recursos
+
+### Los pods consumen recursos
+
+Ideas fundamentales:
+
+- Los pods consumen los recursos (memory cpu, disk) disponibes en los nodos
+- El scheduler aloja un pod en un nodo que tenga en ese momento recursos disponibles para satisfacer los requerimientos del pod
+
+Si no hay recursos disponibles en los nodos de un cluster para desplegar un pod, este se queda en estado de "pending" y en la descripción del evento puede aparecer p.e. el mensaje "Insuficient CPU"
+
+### Requerimientos y límites por defecto
+
+Por defecto, kubernetes asume que cada pod requiere
+
+- `0.5 cpu`
+- `256 MiB memory`
+
+y que no puede sobrepasar los siguientes valores
+
+- `1 CPU`
+- `512Mi memory`
+
+si se configuran los siguientes objetos de kubernetes en el namespace
+
+```yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: mem-limit-range
+spec:
+  limits:
+  - default:
+      memory: 512Mi
+    defaultRequest:
+      memory: 256Mi
+    type: Container
+```
+
+```yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: cpu-limit-range
+spec:
+  limits:
+  - default:
+      cpu: 1
+    defaultRequest:
+      cpu: 0.5
+    type: Container
+```
+
+### Requerimientos y límites personalizados
+
+Los valores por defecto se puden cambiar en el manifiesto como se indica a continuación
+
+```yaml
+#pod-definition
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp
+  labels: 
+    app: myapp
+spec:
+  containers:
+    - name: nginx
+      image: nginx:1.18
+      ports:
+        - containerPort: 8080
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: 1
+        limits:
+          memory: "2Gi"
+          cpu: 2
+```
+
+### Equivalencias en la CPU
+
+Ejemplos:
+
+- 2
+- 0.5
+- 100m
+
+Equivalencias:
+
+0.1 CPU = 100m CPU
+
+1 CPU equivale a
+
+- 1 AWS vCPU
+- 1 GCP Core
+- 1 Azure Core
+- 1 Hyperthread
+
+### Equivalencias en la Memory
+
+Ejemplos:
+
+- "1G"
+- "200Mi"
+- "800Ki"
+
+Equivalencias:
+
+- 1G = 1 gigabyte = 10^9 bytes
+- 1M = 1 megabyte = 10^6 bytes
+- 1K = 1 kilobyte = 10^3 bytes
+
+- 1Gi = 1 gibibyte = 2^30 bytes 
+- 1Mi = 1 mebibyte = 2^20 bytes 
+- 1Ki = 1 kibibyte = 2^10 bytes = 1024 bytes
+
+### Comportamiento al sobrepasar los límites 
+
+Un contenedor no puede consumir más recursos de los que tiene establecidos como límite. ¿Qué ocurre si el contenedor intenta sobrepasar los límtites impuestos?
+
+- En el caso de la CPU, kubernetes estrangula (throttles) la CPU y el contenedor no puede sobrepasar el límite fijado
+- En el caso de la memoria, el contenedor puede usar más memoría de la que tiene limitado por lo que kubernetes tiene que eliminar el pod en caso de que esto ocurra
+
+## Una nota sobre la modificación de pods y deployments
+
+### Modificar el objeto POD
+
+En un pod que ya existe, solo se pueden modificar los siguientes campos en el manifiesto del objeto POD:
+
+- `spec.containers[*].image`
+- `spec.initContainers[*].image`
+- `spec.activeDeadlineSeconds`
+- `spec.tolerations`
+
+Por ejemplo, no se puede modificar mediante `kubectl edit`
+
+- Variables de entorno
+- Service Accounts
+- Limites de recursos
+
+En el caso de quieras modificar existen dos opciones
+
+1. edit + delete + create sobre /tmp/manifest.yaml
+2. extraer definición del pod + delete + create
+
+**En la opción 1**
+
+Hay que ejecutar
+
+```bash
+> kubectl edit pod $POD_NAME
+:qw
+```
+
+de modo que se guardará una copia en una localizacióm temporal- A continuación se ejecuta
+
+```bash
+> kubectl delete pod $POD_NAME
+> kubectl create -f /tmp/kubectl-edit-ccvrq.yaml
+```
+
+**En la opción 2**
+
+Se extrae y se edita la definición del pod
+
+```bash
+> kubectl get pod $POD_NAME -o yaml > pod-definition-new.yaml
+> vim pod-definition-new.yaml
+> kubectl delete pod $POD_NAME
+> kubectl create -f pod-definition-new.yaml
+```
+
+### Modificar el objeto Deployment
+
+En este caso si que se puede editar cualquier campo del objeto. Al modificar el manifiesto, el deployment se encarga de matar y crear los pods que asociados:
+
+```bash
+kubectl edit deployment $DEPLOYMENT_NAME
+```
+
+## Lab. Requerimiento y límites de recursos
+
+Inspeccionamos los límites de recurso que tiene el siguiente pod que se encuentra en estado "CrashLoopBackOff"
+
+Al hacer un
+
+```bash
+> kubectl describe pod elephant
+```
+
+observamos, por un lado que tiene un límite de memoria de 10Mi y por otro lado obsevamos que tiene este estado
+
+```yaml
+State:          Waiting
+  Reason:       CrashLoopBackOff
+Last State:     Terminated
+  Reason:       OOMKilled
+  Exit Code:    1
+  Started:      Thu, 29 Dec 2022 12:11:24 +0000
+  Finished:     Thu, 29 Dec 2022 12:11:24 +0000
+Ready:          False
+```
+
+Modificamos el limite de memoria fijándolo en 20Mi
+
+```bash
+> kubectl edit pod elephant
+> :wq
+A copy of your changes has been stored to "/tmp/kubectl-edit-3773997892.yaml"
+> kubectl delete pod elephant
+> kubectl create -f /tmp/kubectl-edit-3773997892.yaml
+```
+
+## Daemon Sets
